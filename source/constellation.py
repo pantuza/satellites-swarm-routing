@@ -444,16 +444,25 @@ class Constellation():
 		# now add in sats
 		# remember, for sats, the array index = sat ID
 		for sat_idx in range(self.total_sats):
+			sat = self.satellites_array[sat_idx]
 			self.G.add_node(
-				str(self.satellites_array[sat_idx]['ID']),
-				planeNumber=str(self.satellites_array[sat_idx]['plane_number']),
-				offsetNumber=str(self.satellites_array[sat_idx]['offset_number']))
+				str(sat['ID']),
+				planeNumber=str(sat['plane_number']),
+				offsetNumber=str(sat['offset_number']),
+				x=int(sat['x']),
+				y=int(sat['y']),
+				z=int(sat['z']))
 
 		# now add all the ground nodes
 		# gnd pts have negative ID numbers
 		for gnd_idx in range((-self.ground_node_counter)):
-			self.G.add_node(str(self.groundpoints_array[gnd_idx]['ID']),
-				placeName=city_names[gnd_idx])
+			gnd = self.groundpoints_array[gnd_idx]
+			self.G.add_node(
+				str(gnd['ID']),
+				placeName=city_names[gnd_idx],
+				x=int(gnd['x']),
+				y=int(gnd['y']),
+				z=int(gnd['z']))
 
 		# and finally the links (edges in nx terms)
 		for lnk_idx in range(self.total_links):
