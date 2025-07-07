@@ -26,6 +26,10 @@ import numpy as np
 
 # custom classes
 from constellation import Constellation
+from statistics import StatisticsLogger
+
+# routing abstraction
+from routing import OSPFRouter, AODVRouter, GPSRRouter
 
 # OpenGL API for Python
 import vtk
@@ -83,7 +87,7 @@ PATH_LINK_COLOR = (0.8, 0.2, 0.8)  # purpleish? path links
 PATH_LINK_OPACITY = 0.7
 PATH_LINE_WIDTH = 13  # how wide to draw line in pixels
 
-EARTH_SPHERE_POINTS = 5000  # higher = smoother earth model, slower to generate
+EARTH_SPHERE_POINTS = 8000  # higher = smoother earth model, slower to generate
 
 SAT_POINT_SIZE = 9  # how big satellites are in (probably) screen pixels
 GND_POINT_SIZE = 8  # how big ground points are in (probably) screen pixels
@@ -169,13 +173,16 @@ class Simulation():
 			self.capt_interpolation = 1
 			self.make_links = True
 			self.linking_method = '+GRID'  # used because it does not regenerate links
-			self.enable_path_calculation = False
+			self.enable_path_calculation = True
 
 			# timing control
 			self.time_step = 1
 			self.current_simulation_time = int(float(G.graph['simulationTime']))
 			self.pause = True
 			self.num_steps_to_run = -1
+
+			# statistics logging
+			self.stats_loggers = {}
 
 			# performance data
 			self.time_1 = 1
@@ -206,6 +213,9 @@ class Simulation():
 				minCommunicationsAltitude=self.min_communications_altitude,
 				minSatElevation=self.min_sat_elevation,
 				linkingMethod=self.linking_method)
+
+			# init the routing algorithm
+			self.router = AODVRouter()
 
 			# add ground points to the constillation model
 			# from the given file path
@@ -288,13 +298,16 @@ class Simulation():
 			self.capt_interpolation = 1
 			self.make_links = makeLinks
 			self.linking_method = 'SPARSE'  # options: 'IDEAL', '+GRID', 'SPARSE'
-			self.enable_path_calculation = False
+			self.enable_path_calculation = True
 
 			# timing control
 			self.time_step = timeStep
 			self.current_simulation_time = 0.0
 			self.pause = True
 			self.num_steps_to_run = -1
+
+			# statistics logging
+			self.stats_loggers = {}
 
 			# performance data
 			self.time_1 = 1
@@ -319,6 +332,9 @@ class Simulation():
 				minCommunicationsAltitude=self.min_communications_altitude,
 				minSatElevation=self.min_sat_elevation,
 				linkingMethod=self.linking_method)
+
+			# init the routing algorithm
+			self.router = AODVRouter()
 
 			# add ground points to the constillation model
 			# from the given file path
@@ -392,6 +408,33 @@ class Simulation():
 
 		print("done initalizing")
 
+	def initializeStatisticsLogger(self):
+		"""Initialize the statistics logger for the current routing protocol."""
+		if not self.enable_path_calculation:
+			return
+			
+		# Ensure the network graph exists
+		if self.model.G is None:
+			self.model.generateNetworkGraph(self.city_names)
+			
+		router_name = self.router.name
+		if router_name not in self.stats_loggers:
+			orbit_height = self.semi_major_axis - EARTH_RADIUS
+			
+			# Get current source and destination nodes if available
+			source_node = self.path_node_1 if hasattr(self, 'path_node_1') else None
+			dest_node = self.path_node_2 if hasattr(self, 'path_node_2') else None
+			
+			self.stats_loggers[router_name] = StatisticsLogger(
+				routing_name=router_name,
+				num_nodes=self.model.G.number_of_nodes(),
+				network_design=self.linking_method,
+				orbit_height=orbit_height,
+				source_node=source_node,
+				dest_node=dest_node
+			)
+			print(f"[Simulation] Initialized statistics logger for {router_name}")
+
 	def controlThreadHandler(self):
 		"""
 		Start a thread to deal with inter-process communications
@@ -447,10 +490,26 @@ class Simulation():
 					# if reset linking method, must reinit network
 					self.initializeNetworkDesign()
 
+				if command == "setRoutingProtocol":
+					protocol = received_data[1]
+					print(f"setting routing protocol to: {protocol}")
+					if protocol == 'AODV':
+						self.router = AODVRouter()
+					elif protocol == 'OSPF':
+						self.router = OSPFRouter()
+					elif protocol == 'GPSR':
+						self.router = GPSRRouter()
+					else:
+						print(f"Unknown routing protocol: {protocol}")
+
 				if command == "setRunfor":
 					self.num_steps_to_run = int(received_data[1] / self.time_step)-1
 					print("running for: ", self.num_steps_to_run, " timesteps...")
 					self.pause = False
+					# Re-enable path calculation for the new run
+					self.enable_path_calculation = True
+					# Initialize statistics logger when simulation starts running
+					self.initializeStatisticsLogger()
 
 				if command == 'setPathNode1':
 					self.path_node_1 = received_data[1]
@@ -512,6 +571,11 @@ class Simulation():
 		elif self.num_steps_to_run == 0:
 			self.pause = True
 			self.num_steps_to_run = -1
+			# Stop statistics collection when the run finishes
+			print("[Simulation] Run finished - stopping statistics collection")
+			# Clear the loggers and set a flag to prevent further collection
+			self.stats_loggers.clear()
+			self.enable_path_calculation = False  # Temporarily disable to stop collection
 
 		# update links / network design / sat positions
 		self.model.setConstillationTime(new_time)
@@ -540,30 +604,78 @@ class Simulation():
 				degree_list[i] = int(degree_list[i][1])
 			self.max_node_degree = max(degree_list)
 
-		# if enabled, we run dijkstra's between two points
-		if self.enable_path_calculation:
+		# Only collect statistics if we're in an active run (not paused and not finished)
+		# AND if path calculation is enabled (not disabled after run completion)
+		if self.enable_path_calculation and not self.pause and self.num_steps_to_run >= 0:
 			node_1 = self.path_node_1
 			node_2 = self.path_node_2
 			if (node_1 is not None) and (node_2 is not None):
 				id_1 = -(self.city_names.index(node_1) + 1)
 				id_2 = -(self.city_names.index(node_2) + 1)
 
-				# run shortest path, handle exception if path not exist
-				try:
-					path = nx.shortest_path(
-						self.model.G,
-						source=str(id_1),
-						target=str(id_2),
-						weight='distance')
+				# Get the logger for the current routing protocol
+				router_name = self.router.name
+				if router_name in self.stats_loggers:
+					logger = self.stats_loggers[router_name]
 
-					# convert list of nodes into edges
-					self.path_links = []
-					for i in range(len(path)-1):
-						self.path_links.append([path[i], path[i+1]])
+					# ask router to find a route, handle exception if path not exist
+					path = None
+					time_taken_us = -1
+					
+					try:
+						start_time = time.perf_counter_ns()
+						path = self.router.find_route(
+							self.model.G,
+							source=str(id_1),
+							target=str(id_2),
+							weight='distance')
+						time_taken_us = (time.perf_counter_ns() - start_time) / 1000
 
-				except nx.exception.NetworkXNoPath:
-					print("path does not exist...")
-					self.path_links = None
+						# convert list of nodes into edges
+						self.path_links = []
+						total_distance = 0
+						for i in range(len(path) - 1):
+							self.path_links.append([path[i], path[i+1]])
+							total_distance += self.model.G[path[i]][path[i+1]]['distance']
+
+						# Convert path node IDs to names for better readability
+						path_names = []
+						for node_id in path:
+							node_id_int = int(node_id)
+							if node_id_int < 0:
+								# Ground node - get the city name
+								city_index = -node_id_int - 1
+								if city_index < len(self.city_names):
+									path_names.append(self.city_names[city_index])
+								else:
+									path_names.append(f"Ground_{node_id_int}")
+							else:
+								# Satellite node - use the ID as is
+								path_names.append(f"Sat_{node_id_int}")
+
+						logger.log_route(
+							time_taken_us=time_taken_us,
+							num_hops=len(path) - 1,
+							total_distance=total_distance,
+							source_node=node_1,  # Use the actual city name
+							dest_node=node_2,    # Use the actual city name
+							path=path_names,     # Use the path with names
+							timestamp=self.current_simulation_time
+						)
+
+					except (nx.exception.NetworkXNoPath, nx.exception.NodeNotFound):
+						print("path does not exist...")
+						self.path_links = None
+						# Log the failure
+						logger.log_route(
+							time_taken_us=time_taken_us, # Will be -1 if find_route failed before timing
+							num_hops=-1,
+							total_distance=-1,
+							source_node=node_1,  # Use the actual city name
+							dest_node=node_2,    # Use the actual city name
+							path=[],             # Empty path for failed routes
+							timestamp=self.current_simulation_time
+						)
 
 		# TODO:figure out the max number of links per sat in ideal case
 
@@ -836,6 +948,14 @@ class Simulation():
 		# put screenshots of animation into papers/presentations
 		self.renderer.SetBackground(BACKGROUND_COLOR)
 
+		# Set up camera to make Earth appear larger
+		camera = self.renderer.GetActiveCamera()
+		# Position camera closer to Earth for larger appearance
+		camera.SetPosition(0, 0, EARTH_RADIUS * 1.5)  # Closer to Earth
+		camera.SetFocalPoint(0, 0, 0)  # Look at center of Earth
+		camera.SetViewUp(0, 1, 0)  # Set up direction
+		self.renderer.ResetCamera()
+
 		self.interactor.Initialize()
 		print('initialized interactor')
 
@@ -846,7 +966,7 @@ class Simulation():
 		print('set up timer')
 
 		# start the model
-		self.renderWindow.SetSize(512, 512)
+		self.renderWindow.SetSize(2048, 1536) # apect ratio 4:3
 		self.renderWindow.Render()
 		print('started render')
 		self.interactor.Start()
