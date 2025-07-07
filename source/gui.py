@@ -52,6 +52,9 @@ MAKE_LINKS = True
 # in the GUI
 NETWORK_DESIGNS = ["SPARSE", "+GRID", "IDEAL"]
 
+# Add the available routing protocols
+ROUTING_PROTOCOLS = ["AODV", "OSPF", "GPSR"]
+
 # button styles:
 
 # red, black text
@@ -201,6 +204,14 @@ class ApplicationWindow(QWidget):
 		self.linksSelect.activated[str].connect(self.setLinkingMethod)
 		self.controls.addWidget(self.linksLabel, 5, 0)
 		self.controls.addWidget(self.linksSelect, 5, 1)
+
+		# add a drop down to select routing protocol
+		self.routingLabel = QLabel("Routing Protocol:")
+		self.routingSelect = QComboBox()
+		self.routingSelect.addItems(ROUTING_PROTOCOLS)
+		self.routingSelect.activated[str].connect(self.setRoutingProtocol)
+		self.controls.addWidget(self.routingLabel, 5, 2)
+		self.controls.addWidget(self.routingSelect, 5, 3)
 
 		# controls for running for a set time
 		self.runforLabel = QLabel("Run For (seconds):")
@@ -396,12 +407,19 @@ class ApplicationWindow(QWidget):
 	def setLinkingMethod(self, text):
 		self.myPipeConn.send(["setLinkingMethod", text])
 
+	def setRoutingProtocol(self, text):
+		"""Sends the selected routing protocol to the simulation process."""
+		try:
+			self.myPipeConn.send(["setRoutingProtocol", text])
+		except (EOFError, AttributeError):
+			print('Could not set routing protocol, is a simulation running?')
+
 	def setRunfor(self):
 		"""
 		runs the simulation for a set time then stops
 		"""
 
-		runtime = int(self.runforEdit.text())
+		runtime = int(self.runforEdit.text()) * 1000 # Convert milliseconds to seconds
 		self.pause = False
 		self.togglePlayButton.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
 		try:
