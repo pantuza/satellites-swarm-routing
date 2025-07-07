@@ -1,0 +1,26 @@
+# SILLEO-SCNS Dependencies
+# Core simulation dependencies
+numpy>=1.20.0
+networkx>=2.5
+PyAstronomy>=0.9.0
+vtk>=9.0.0
+
+# GUI dependencies
+PyQt5>=5.15.0
+
+# Statistics and analysis dependencies
+pandas>=1.3.0
+pyarrow>=5.0.0
+
+# Optional performance optimization
+numba>=0.56.0
+
+# Development and analysis tools
+matplotlib>=3.5.0
+seaborn>=0.11.0
+scipy>=1.7.0
+jupyter>=1.0.0
+ipykernel>=6.0.0
+
+# Additional utilities
+pathlib2>=2.3.0; python_version < "3.4" 
