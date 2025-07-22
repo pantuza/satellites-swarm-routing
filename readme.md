@@ -17,3 +17,15 @@ Simulation logs are stored in `data/` folder.
 * All of my development and testing has been done with linux mint 19.3, with kernel version 5.3
 * [Install Guide](installguide.md)
 * [User Guide](userguide.md)
+
+
+## Route Computation Examples
+
+<div style="display: flex; justify-content: space-between;">
+  <img src="pics/route-from-aodv.png" width="200" height="200" alt="AODV Route Computation" />
+  <img src="pics/route-from-gpsr.png" width="200" height="200" alt="GPSR Route Computation" />
+  <img src="pics/route-from-ospf.png" width="200" height="200" alt="OSPF Route Computation" />
+</div>
+
+The images above show examples of route computation for AODV (left), GPSR (middle), and OSPF (right) routing protocols in the satellite swarm network simulation.
+
